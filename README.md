@@ -77,10 +77,9 @@ To change the core mining parameters, you need to edit the miner's startup scrip
 
 2.  Modify the values for the following flags:
 
-      * `--min-beth-per-epoch`: The minimum amount of BETH you are willing to spend per epoch.
-      * `--max-beth-per-epoch`: The maximum amount of BETH you are willing to spend per epoch.
-      * `--assumed-worm-price`: Your assumed WORM/ETH price.
-      * `--future-epochs`: How many future epochs to participate in.
+      * `--amount-per-epoch`: Specifies how much BETH you're willing to spend per epoch.
+      * `--num-epochs`: Defines how many epochs you'd like to participate in ahead of time.
+      * `--claim-interval`: Determines how many epochs to wait between claim operations.
 
 3.  Save the file (`Ctrl+O`, then `Enter`) and exit (`Ctrl+X`).
 
