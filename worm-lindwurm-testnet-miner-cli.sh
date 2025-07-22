@@ -19,6 +19,7 @@ fastest_rpc_file="$log_dir/fastest_rpc.log"
 
 # A more reliable list of RPCs to test
 sepolia_rpcs=(
+    "https://sepolia.gateway.tenderly.co"
     "https://sepolia.drpc.org"
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
@@ -46,6 +47,7 @@ find_fastest_rpc() {
     min_latency=999999
 
     for rpc in "${sepolia_rpcs[@]}"; do
+        # Use --max-time to prevent hangs on unresponsive RPCs
         latency=$(curl -o /dev/null --connect-timeout 5 --max-time 10 -s -w "%{time_total}" "$rpc" || echo "999999")
         echo -e "Testing RPC: $rpc | Latency: ${YELLOW}$latency${NC} seconds"
         if (( $(echo "$latency < $min_latency" | bc -l) && $(echo "$latency > 0" | bc -l) )); then
@@ -67,12 +69,12 @@ find_fastest_rpc() {
 while true; do
   clear
   echo -e "${GREEN}"
-  cat << 'EOF'
+  cat << "EOL"
     ╦ ╦╔═╗╦═╗╔╦╗
     ║║║║ ║╠╦╝║║║
     ╚╩╝╚═╝╩╚═╩ ╩
     powered by EIP-7503
-EOF
+EOL
   echo -e "${NC}"
 
   echo -e "${GREEN}---- WORM MINER TOOL ----${NC}"
@@ -152,7 +154,7 @@ EOF
       echo -e "${GREEN}[*] Warning: Back up $key_file securely, as it contains your private key.${NC}"
 
       echo -e "${GREEN}[*] Creating miner start script...${NC}"
-      cat << EOF > "$miner_dir/start-miner.sh"
+      tee "$miner_dir/start-miner.sh" > /dev/null <<EOL
 #!/bin/bash
 PRIVATE_KEY=\$(cat "$key_file")
 FASTEST_RPC=\$(cat "$fastest_rpc_file")
@@ -160,14 +162,14 @@ exec "$worm_miner_bin" mine \\
   --network sepolia \\
   --private-key "\$PRIVATE_KEY" \\
   --custom-rpc "\$FASTEST_RPC" \\
-  --amount-per-epoch 0.0001 \\
-  --num-epochs 3 \\
-  --claim-interval 3
-EOF
+  --amount-per-epoch "0.0001" \\
+  --num-epochs "3" \\
+  --claim-interval "10"
+EOL
       chmod +x "$miner_dir/start-miner.sh"
 
       echo -e "${GREEN}[*] Creating and enabling systemd service...${NC}"
-      sudo bash -c "cat << EOF > /etc/systemd/system/worm-miner.service
+      sudo tee /etc/systemd/system/worm-miner.service > /dev/null <<EOL
 [Unit]
 Description=Worm Miner (Sepolia Testnet)
 After=network.target
@@ -178,13 +180,13 @@ WorkingDirectory=$miner_dir
 ExecStart=$miner_dir/start-miner.sh
 Restart=always
 RestartSec=10
-Environment=\"RUST_LOG=info\"
+Environment="RUST_LOG=info"
 StandardOutput=append:$log_file
 StandardError=append:$log_file
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOL
 
       sudo systemctl daemon-reload
       sudo systemctl enable --now worm-miner
@@ -225,7 +227,7 @@ EOF"
         fi
       done
 
-      wallet_address=$("$worm_miner_bin" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" | grep "burn-address" | awk '{print $4}')
+      wallet_address=$($worm_miner_bin info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" | grep "burn-address" | awk '{print $4}')
       echo -e "${BOLD}Burning... | Fee: $fee ETH | Spend: $spend ETH | Receiver: $wallet_address${NC}"
 
       cd "$miner_dir"
@@ -263,7 +265,7 @@ EOF"
       fi
       cd "$miner_dir"
       git pull origin main
-      echo -e "${GREEN}[*] Building and installing miner binary...${NC}"
+      echo -e "${GREEN}[*] Building and installing optimized miner binary...${NC}"
       cargo clean
       RUSTFLAGS="-C target-cpu=native" cargo install --path .
       if [ ! -f "$worm_miner_bin" ]; then
@@ -280,15 +282,10 @@ EOF"
       echo -e "${GREEN}[*] Uninstalling Miner...${NC}"
       sudo systemctl stop worm-miner || true
       sudo systemctl disable worm-miner || true
- proceed with uninstallation? [y/N]: " confirm
-        if [[ "$confirm" =~ ^[yY]$ ]]; then
-          sudo rm -f /etc/systemd/system/worm-miner.service
-          sudo systemctl daemon-reload
-          rm -rf "$log_dir" "$miner_dir" "$worm_miner_bin"
-          echo -e "${GREEN}[+] Miner has been uninstalled.${NC}"
-        else
-          echo -e "${RED}Aborting uninstallation.${NC}"
-        fi
+      sudo rm -f /etc/systemd/system/worm-miner.service
+      sudo systemctl daemon-reload
+      rm -rf "$log_dir" "$miner_dir" "$worm_miner_bin"
+      echo -e "${GREEN}[+] Miner has been uninstalled.${NC}"
       ;;
     6)
       echo -e "${GREEN}[*] Claiming WORM Rewards...${NC}"
