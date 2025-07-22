@@ -19,16 +19,23 @@ A user-friendly command-line interface for installing, managing, and interacting
 
 ## Quick Start
 
-To use the Worm Miner CLI, download the script and run it locally. This launches an interactive menu to manage the miner.
+To use the Worm Miner CLI, download the script and run it locally to launch the interactive menu. Follow these steps:
 
-1. Download the script:
-   `curl -sSL https://raw.githubusercontent.com/scarletbright/Worm-Lindwurm-Sepolia-testnet-miner-client/main/worm-lindwurm-testnet-miner-cli.sh -o worm-miner.sh`
+* **Download the script**:
 
-1. Make the script executable:
-   `chmod +x worm-miner.sh`
-1. Run the script:
-    `./worm-miner.sh
-    `
+```bash
+curl -sSL https://raw.githubusercontent.com/scarletbright/Worm-Lindwurm-Sepolia-testnet-miner-client/main/worm-lindwurm-testnet-miner-cli.sh -o worm-miner.sh
+```
+
+*  **Make the script executable**:
+```
+chmod +x worm-miner.sh
+```
+
+*  **Run the script**:
+```
+./worm-miner.sh
+```
 
 -----
 
