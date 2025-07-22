@@ -19,7 +19,6 @@ fastest_rpc_file="$log_dir/fastest_rpc.log"
 
 # A more reliable list of RPCs to test
 sepolia_rpcs=(
-    "https://sepolia.gateway.tenderly.co"
     "https://sepolia.drpc.org"
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
