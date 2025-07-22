@@ -161,10 +161,9 @@ exec "$worm_miner_bin" mine \\
   --network sepolia \\
   --private-key "\$PRIVATE_KEY" \\
   --custom-rpc "\$FASTEST_RPC" \\
-  --min-beth-per-epoch 0.0001 \\
-  --max-beth-per-epoch 0.01 \\
-  --assumed-worm-price 0.000002 \\
-  --future-epochs 3
+  --amount-per-epoch 0.0001 \\
+  --num-epochs 3 \\
+  --claim-interval 3
 EOL
       chmod +x "$miner_dir/start-miner.sh"
 
