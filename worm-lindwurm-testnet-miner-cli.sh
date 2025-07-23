@@ -22,7 +22,6 @@ sepolia_rpcs=(
     "https://sepolia.drpc.org"
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
-    "https://eth-sepolia-public.unifra.io"
 )
 
 # Helper: Get private key from user file
@@ -201,33 +200,10 @@ EOL
       fi
       fastest_rpc=$(cat "$fastest_rpc_file")
 
-      amount=""
-      while true; do
-        read -p "Enter ETH amount to burn (e.g., 0.1, max 1): " amount
-        if [[ "$amount" =~ ^[0-9.]+$ ]] && (( $(echo "$amount > 0 && $amount <= 1" | bc -l) )); then
-          break
-        else
-          echo -e "${YELLOW}Invalid amount. Must be a number > 0 and <= 1.${NC}"
-        fi
-      done
+      read -p "Enter total ETH amount to burn (e.g., 1.0): " amount
+      read -p "Enter amount to spend as BETH (e.g., 1.0): " spend
 
-      fee=""
-      while true; do
-        read -p "Enter burn fee (e.g., 0.001 ETH): " fee
-        if [[ "$fee" =~ ^[0-9.]+$ ]] && (( $(echo "$fee >= 0" | bc -l) )); then
-          spend=$(echo "$amount - $fee" | bc)
-          if (( $(echo "$spend >= 0" | bc -l) )); then
-            break
-          else
-            echo -e "${YELLOW}Fee cannot be greater than the burn amount.${NC}"
-          fi
-        else
-          echo -e "${YELLOW}Invalid fee. Must be a positive number.${NC}"
-        fi
-      done
-
-      wallet_address=$($worm_miner_bin info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" | grep "burn-address" | awk '{print $4}')
-      echo -e "${BOLD}Burning... | Fee: $fee ETH | Spend: $spend ETH | Receiver: $wallet_address${NC}"
+      echo -e "${BOLD}Starting burn process...${NC}"
 
       cd "$miner_dir"
       "$worm_miner_bin" burn \
@@ -235,15 +211,10 @@ EOL
         --private-key "$private_key" \
         --custom-rpc "$fastest_rpc" \
         --amount "$amount" \
-        --fee "$fee" \
-        --spend "$spend"
+        --spend "$spend" \
+        --fee "0"
 
-      if [ ! -s "input.json" ] || [ ! -s "witness.wtns" ]; then
-        echo -e "${YELLOW}Error: Proof files (input.json, witness.wtns) not found or empty.${NC}"
-        echo -e "${YELLOW}Check miner output for details.${NC}"
-      else
-        echo -e "${GREEN}[+] Burn completed. Proof files generated in $miner_dir.${NC}"
-      fi
+      echo -e "${GREEN}[+] Burn process finished.${NC}"
       ;;
     3)
       echo -e "${GREEN}[*] Checking Balances...${NC}"
