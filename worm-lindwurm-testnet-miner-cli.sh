@@ -19,14 +19,20 @@ fastest_rpc_file="$log_dir/fastest_rpc.log"
 
 # A more reliable list of RPCs to test
 sepolia_rpcs=(
-    "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
-    "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
-    "https://lb.drpc.org/sepolia/AkhJnvrfNEEXvyMMbSG_oUi9ITlPhuYR8IfjqhnKxixj"
     "https://sepolia.drpc.org"
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
     "https://sepolia.gateway.tenderly.co"
     "https://rpc.sepolia.org"
+    "https://1rpc.io/sepolia"
+    "https://sepolia.blockpi.network/v1/rpc/public"
+    "https://endpoints.omniatech.io/v1/eth/sepolia/public"
+    "https://ethereum-sepolia.blockpi.network/v1/rpc/public"
+    "https://rpc2.sepolia.org"
+    "https://sepolia-rpc.scroll.io"
+    "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
+    "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
+    "https://lb.drpc.org/sepolia/AkhJnvrfNEEXvyMMbSG_oUi9ITlPhuYR8IfjqhnKxixj"
 )
 
 # Helper: Get private key from user file
@@ -46,10 +52,16 @@ get_private_key() {
 # Test RPC connectivity and latency with rate limit detection
 test_rpc() {
     local rpc_url="$1"
-    local timeout_seconds=5
+    local timeout_seconds=3
+    
+    # Simple connectivity test first
+    if ! curl -s --connect-timeout 2 --max-time 2 "$rpc_url" >/dev/null 2>&1; then
+        echo "999999"
+        return 1
+    fi
     
     # Use curl to test with proper timing
-    local start_time=$(perl -MTime::HiRes=time -E 'say time' 2>/dev/null || python3 -c "import time; print(time.time())" 2>/dev/null || echo "$(date +%s)")
+    local start_time=$(date +%s.%N 2>/dev/null || date +%s)
     
     local response=$(curl -s --connect-timeout $timeout_seconds --max-time $timeout_seconds \
         -X POST \
@@ -57,13 +69,20 @@ test_rpc() {
         -d '{"method": "eth_blockNumber","params": [],"id": "1","jsonrpc": "2.0"}' \
         "$rpc_url" 2>/dev/null)
     
-    local end_time=$(perl -MTime::HiRes=time -E 'say time' 2>/dev/null || python3 -c "import time; print(time.time())" 2>/dev/null || echo "$(date +%s)")
+    local curl_exit_code=$?
+    local end_time=$(date +%s.%N 2>/dev/null || date +%s)
+    
+    # Check curl exit code first
+    if [ $curl_exit_code -ne 0 ]; then
+        echo "999999"
+        return 1
+    fi
     
     # Check for rate limit or other errors
     if [[ "$response" == *"rate limit"* ]] || [[ "$response" == *"429"* ]] || [[ "$response" == *"too many requests"* ]]; then
         echo "RATE_LIMITED"
         return 2
-    elif [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
+    elif [[ "$response" == *"result"* ]] && [[ "$response" == *"0x"* ]]; then
         local latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
         echo "$latency"
         return 0
@@ -335,9 +354,9 @@ EOL
       private_key=$(get_private_key) || exit 1
 
       # Retry mechanism for balance check
-      local max_retries=3
-      local retry_count=0
-      local success=false
+      max_retries=3
+      retry_count=0
+      success=false
       
       while [ $retry_count -lt $max_retries ] && [ "$success" = false ]; do
         fastest_rpc=$(get_current_rpc)
