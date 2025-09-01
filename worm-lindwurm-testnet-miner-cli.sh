@@ -43,7 +43,7 @@ get_private_key() {
   echo "$private_key"
 }
 
-# Test RPC connectivity and latency
+# Test RPC connectivity and latency with rate limit detection
 test_rpc() {
     local rpc_url="$1"
     local timeout_seconds=5
@@ -59,7 +59,11 @@ test_rpc() {
     
     local end_time=$(perl -MTime::HiRes=time -E 'say time' 2>/dev/null || python3 -c "import time; print(time.time())" 2>/dev/null || echo "$(date +%s)")
     
-    if [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
+    # Check for rate limit or other errors
+    if [[ "$response" == *"rate limit"* ]] || [[ "$response" == *"429"* ]] || [[ "$response" == *"too many requests"* ]]; then
+        echo "RATE_LIMITED"
+        return 2
+    elif [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
         local latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
         echo "$latency"
         return 0
@@ -69,21 +73,28 @@ test_rpc() {
     fi
 }
 
-# Find the fastest RPC
+# Find the fastest available RPC with rate limit handling
 find_fastest_rpc() {
     echo -e "${GREEN}[*] 正在查找最快的 Sepolia RPC...${NC}"
     local fastest_rpc=""
     local min_latency=999999
+    local available_rpcs=()
 
     for rpc in "${sepolia_rpcs[@]}"; do
         echo -e "${YELLOW}测试 RPC: $rpc${NC}"
         
-        local latency=$(test_rpc "$rpc")
+        local result=$(test_rpc "$rpc")
+        local exit_code=$?
         
-        if [[ "$latency" != "999999" && $(echo "$latency < $min_latency" | awk '{print ($1 < $2)}') -eq 1 ]]; then
-            min_latency=$latency
-            fastest_rpc=$rpc
-            echo -e "  延迟: ${GREEN}$latency${NC} 秒 ✓"
+        if [[ "$result" == "RATE_LIMITED" ]]; then
+            echo -e "  ${YELLOW}速率限制${NC} ⚠"
+        elif [[ "$exit_code" -eq 0 && "$result" != "999999" ]]; then
+            available_rpcs+=("$rpc")
+            if [[ $(echo "$result < $min_latency" | awk '{print ($1 < $2)}') -eq 1 ]]; then
+                min_latency=$result
+                fastest_rpc=$rpc
+            fi
+            echo -e "  延迟: ${GREEN}$result${NC} 秒 ✓"
         else
             echo -e "  ${RED}连接失败${NC} ✗"
         fi
@@ -91,7 +102,10 @@ find_fastest_rpc() {
 
     if [ -n "$fastest_rpc" ]; then
         echo "$fastest_rpc" > "$fastest_rpc_file"
+        # Save backup RPCs list
+        printf '%s\n' "${available_rpcs[@]}" > "$log_dir/available_rpcs.log"
         echo -e "${GREEN}[+] 最快的 RPC 已设置为: $fastest_rpc，延迟: $min_latency 秒。${NC}"
+        echo -e "${GREEN}[+] 发现 ${#available_rpcs[@]} 个可用的 RPC 节点。${NC}"
     else
         echo -e "${RED}错误: 无法确定最快的 RPC。请检查您的网络连接。${NC}"
         # Set a default RPC as fallback
@@ -100,13 +114,54 @@ find_fastest_rpc() {
     fi
 }
 
-# Get current RPC with health check
+# Get next available RPC from backup list
+get_next_rpc() {
+    if [ -f "$log_dir/available_rpcs.log" ]; then
+        local current_rpc=$(cat "$fastest_rpc_file" 2>/dev/null)
+        local found_current=false
+        local next_rpc=""
+        
+        while IFS= read -r rpc; do
+            if [ "$found_current" = true ]; then
+                next_rpc="$rpc"
+                break
+            elif [ "$rpc" = "$current_rpc" ]; then
+                found_current=true
+            fi
+        done < "$log_dir/available_rpcs.log"
+        
+        # If no next RPC found, use the first one
+        if [ -z "$next_rpc" ]; then
+            next_rpc=$(head -n 1 "$log_dir/available_rpcs.log" 2>/dev/null)
+        fi
+        
+        if [ -n "$next_rpc" ]; then
+            echo "$next_rpc" > "$fastest_rpc_file"
+            echo -e "${YELLOW}[!] 切换到备用 RPC: $next_rpc${NC}"
+            echo "$next_rpc"
+            return 0
+        fi
+    fi
+    
+    # Fallback: find new fastest RPC
+    find_fastest_rpc
+    cat "$fastest_rpc_file"
+    return 0
+}
+
+# Get current RPC with health check and auto-switching
 get_current_rpc() {
     if [ -f "$fastest_rpc_file" ]; then
         local current_rpc=$(cat "$fastest_rpc_file")
         # Test if current RPC is still working
-        local latency=$(test_rpc "$current_rpc")
-        if [[ "$latency" != "999999" ]]; then
+        local result=$(test_rpc "$current_rpc")
+        local exit_code=$?
+        
+        if [[ "$result" == "RATE_LIMITED" ]]; then
+            echo -e "${YELLOW}[!] 当前 RPC 速率限制，正在切换到备用节点...${NC}"
+            get_next_rpc
+            return 0
+        elif [[ "$exit_code" -eq 0 && "$result" != "999999" ]]; then
             echo "$current_rpc"
             return 0
         else
@@ -279,9 +334,31 @@ EOL
       echo -e "${GREEN}[*] 正在检查余额...${NC}"
       private_key=$(get_private_key) || exit 1
 
-      fastest_rpc=$(get_current_rpc)
-
-      "$worm_miner_bin" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+      # Retry mechanism for balance check
+      local max_retries=3
+      local retry_count=0
+      local success=false
+      
+      while [ $retry_count -lt $max_retries ] && [ "$success" = false ]; do
+        fastest_rpc=$(get_current_rpc)
+        
+        if [ $retry_count -gt 0 ]; then
+          echo -e "${YELLOW}[!] 重试第 $retry_count 次...${NC}"
+          sleep 2
+        fi
+        
+        if "$worm_miner_bin" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"; then
+          success=true
+        else
+          retry_count=$((retry_count + 1))
+          if [ $retry_count -lt $max_retries ]; then
+            echo -e "${YELLOW}[!] 操作失败，将在2秒后重试...${NC}"
+          else
+            echo -e "${RED}[!] 操作失败，已达到最大重试次数。请检查网络连接或稍后再试。${NC}"
+          fi
+        fi
+      done
+      
       read -p "按 Enter 键继续..."
       ;;
     4)
