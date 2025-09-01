@@ -43,37 +43,47 @@ get_private_key() {
   echo "$private_key"
 }
 
+# Test RPC connectivity and latency
+test_rpc() {
+    local rpc_url="$1"
+    local timeout_seconds=5
+    
+    # Use curl to test with proper timing
+    local start_time=$(perl -MTime::HiRes=time -E 'say time' 2>/dev/null || python3 -c "import time; print(time.time())" 2>/dev/null || echo "$(date +%s)")
+    
+    local response=$(curl -s --connect-timeout $timeout_seconds --max-time $timeout_seconds \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"method": "eth_blockNumber","params": [],"id": "1","jsonrpc": "2.0"}' \
+        "$rpc_url" 2>/dev/null)
+    
+    local end_time=$(perl -MTime::HiRes=time -E 'say time' 2>/dev/null || python3 -c "import time; print(time.time())" 2>/dev/null || echo "$(date +%s)")
+    
+    if [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
+        local latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
+        echo "$latency"
+        return 0
+    else
+        echo "999999"
+        return 1
+    fi
+}
+
 # Find the fastest RPC
 find_fastest_rpc() {
     echo -e "${GREEN}[*] 正在查找最快的 Sepolia RPC...${NC}"
-    fastest_rpc=""
-    min_latency=999999
+    local fastest_rpc=""
+    local min_latency=999999
 
     for rpc in "${sepolia_rpcs[@]}"; do
         echo -e "${YELLOW}测试 RPC: $rpc${NC}"
         
-        # Test with JSON-RPC request
-        start_time=$(date +%s.%N)
-        response=$(curl -s --connect-timeout 5 --max-time 10 \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d '{"method": "eth_blockNumber","params": [],"id": "1","jsonrpc": "2.0"}' \
-            "$rpc" 2>/dev/null)
-        end_time=$(date +%s.%N)
+        local latency=$(test_rpc "$rpc")
         
-        if [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
-            # Calculate latency
-            latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
+        if [[ "$latency" != "999999" && $(echo "$latency < $min_latency" | awk '{print ($1 < $2)}') -eq 1 ]]; then
+            min_latency=$latency
+            fastest_rpc=$rpc
             echo -e "  延迟: ${GREEN}$latency${NC} 秒 ✓"
-            
-            # Convert to milliseconds for comparison
-            latency_ms=$(echo "$latency * 1000" | awk '{printf "%.0f", $1}')
-            min_latency_ms=$(echo "$min_latency * 1000" | awk '{printf "%.0f", $1}')
-            
-            if [[ "$latency_ms" -lt "$min_latency_ms" ]]; then
-                min_latency=$latency
-                fastest_rpc=$rpc
-            fi
         else
             echo -e "  ${RED}连接失败${NC} ✗"
         fi
@@ -87,6 +97,28 @@ find_fastest_rpc() {
         # Set a default RPC as fallback
         echo "https://sepolia.drpc.org" > "$fastest_rpc_file"
         echo -e "${YELLOW}[!] 使用默认 RPC: https://sepolia.drpc.org${NC}"
+    fi
+}
+
+# Get current RPC with health check
+get_current_rpc() {
+    if [ -f "$fastest_rpc_file" ]; then
+        local current_rpc=$(cat "$fastest_rpc_file")
+        # Test if current RPC is still working
+        local latency=$(test_rpc "$current_rpc")
+        if [[ "$latency" != "999999" ]]; then
+            echo "$current_rpc"
+            return 0
+        else
+            echo -e "${YELLOW}[!] 当前 RPC 不可用，正在查找新的 RPC...${NC}"
+            find_fastest_rpc
+            cat "$fastest_rpc_file"
+            return 0
+        fi
+    else
+        find_fastest_rpc
+        cat "$fastest_rpc_file"
+        return 0
     fi
 }
 
@@ -224,10 +256,7 @@ EOL
       echo -e "${GREEN}[*] 正在燃烧 ETH 获取 BETH${NC}"
       private_key=$(get_private_key) || exit 1
 
-      if [ ! -f "$fastest_rpc_file" ]; then
-        find_fastest_rpc
-      fi
-      fastest_rpc=$(cat "$fastest_rpc_file")
+      fastest_rpc=$(get_current_rpc)
 
       read -p "请输入要燃烧的 ETH 总量 (例如: 1.0): " amount
       read -p "请输入要作为 BETH 花费的数量 (例如: 1.0): " spend
@@ -244,17 +273,16 @@ EOL
         --fee "0"
 
       echo -e "${GREEN}[+] 燃烧过程已完成。${NC}"
+      read -p "按 Enter 键继续..."
       ;;
     3)
       echo -e "${GREEN}[*] 正在检查余额...${NC}"
       private_key=$(get_private_key) || exit 1
 
-      if [ ! -f "$fastest_rpc_file" ]; then
-        find_fastest_rpc
-      fi
-      fastest_rpc=$(cat "$fastest_rpc_file")
+      fastest_rpc=$(get_current_rpc)
 
       "$worm_miner_bin" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+      read -p "按 Enter 键继续..."
       ;;
     4)
       echo -e "${GREEN}[*] 正在更新挖矿程序...${NC}"
@@ -290,10 +318,7 @@ EOL
       echo -e "${GREEN}[*] 正在领取 WORM 奖励...${NC}"
       private_key=$(get_private_key) || exit 1
 
-      if [ ! -f "$fastest_rpc_file" ]; then
-        find_fastest_rpc
-      fi
-      fastest_rpc=$(cat "$fastest_rpc_file")
+      fastest_rpc=$(get_current_rpc)
 
       read -p "请输入起始纪元 (例如: 0): " from_epoch
       read -p "请输入要领取的纪元数量 (例如: 10): " num_epochs
@@ -307,6 +332,7 @@ EOL
       fi
       "$worm_miner_bin" claim --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" --from-epoch "$from_epoch" --num-epochs "$num_epochs"
       echo -e "${GREEN}[+] WORM 奖励领取过程已完成。${NC}"
+      read -p "按 Enter 键继续..."
       ;;
     7)
       echo -e "${GREEN}[*] 正在显示挖矿日志的最后15行...${NC}"
@@ -315,10 +341,12 @@ EOL
       else
         echo -e "${YELLOW}未找到日志文件。挖矿程序是否已安装并正在运行？${NC}"
       fi
+      read -p "按 Enter 键继续..."
       ;;
     8)
       echo -e "${GREEN}[*] 正在查找并设置最快的 RPC...${NC}"
       find_fastest_rpc
+      read -p "按 Enter 键继续..."
       ;;
     9)
       echo -e "${GREEN}[*] 设置钱包私钥${NC}"
