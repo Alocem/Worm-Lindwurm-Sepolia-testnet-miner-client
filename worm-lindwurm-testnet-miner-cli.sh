@@ -442,26 +442,111 @@ EOL
       read -p "按 Enter 键继续..."
       ;;
     4)
-      echo -e "${GREEN}[*] 正在燃烧 ETH 获取 BETH${NC}"
+      echo -e "${GREEN}[*] 批量燃烧 ETH 获取 BETH${NC}"
       private_key=$(get_private_key) || exit 1
 
       fastest_rpc=$(get_current_rpc)
 
-      read -p "请输入要燃烧的 ETH 总量 (例如: 1.0): " amount
-      read -p "请输入要作为 BETH 花费的数量 (例如: 1.0): " spend
+      # Get total burn amount from user
+      read -p "请输入要燃烧的 ETH 总量 (例如: 5.0): " total_burn_amount
+      
+      # Validate total amount
+      if ! [[ "$total_burn_amount" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        echo -e "${RED}错误: 请输入有效的数字格式${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
+      
+      # Get single burn parameters
+      echo -e "${YELLOW}设置单次燃烧参数 (由于最大燃烧限制为1 ETH):${NC}"
+      read -p "请输入单次燃烧的 ETH 数量 (例如: 1.0): " amount
+      read -p "请输入单次作为 BETH 花费的数量 (例如: 1.0): " spend
+      
+      # Validate single burn parameters
+      if ! [[ "$amount" =~ ^[0-9]+\.?[0-9]*$ ]] || ! [[ "$spend" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        echo -e "${RED}错误: 请输入有效的数字格式${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
+      
+      # Calculate how many burns needed
+      burn_count=$(echo "scale=0; $total_burn_amount / $amount" | bc -l)
+      remaining=$(echo "scale=6; $total_burn_amount % $amount" | bc -l)
+      
+      echo -e "${GREEN}燃烧计划:${NC}"
+      echo -e "  总燃烧量: ${BOLD}$total_burn_amount ETH${NC}"
+      echo -e "  单次燃烧: ${BOLD}$amount ETH${NC} (花费: $spend BETH)"
+      echo -e "  完整燃烧次数: ${BOLD}$burn_count${NC}"
+      if (( $(echo "$remaining > 0" | bc -l) )); then
+        echo -e "  剩余燃烧: ${BOLD}$remaining ETH${NC}"
+      fi
+      echo ""
+      
+      read -p "确认执行批量燃烧操作？ [y/N]: " confirm
+      if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}操作已取消${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
 
-      echo -e "${BOLD}正在开始燃烧过程...${NC}"
-
+      echo -e "${BOLD}正在开始批量燃烧过程...${NC}"
       cd "$miner_dir"
-      "$worm_miner_bin" burn \
-        --network sepolia \
-        --private-key "$private_key" \
-        --custom-rpc "$fastest_rpc" \
-        --amount "$amount" \
-        --spend "$spend" \
-        --fee "0.0001"
-
-      echo -e "${GREEN}[+] 燃烧过程已完成。${NC}"
+      
+      # Perform full burns
+      current_burn=1
+      total_burned="0"
+      
+      for ((i=1; i<=burn_count; i++)); do
+        echo -e "${GREEN}[*] 执行第 $i/$burn_count 次燃烧...${NC}"
+        
+        if "$worm_miner_bin" burn \
+          --network sepolia \
+          --private-key "$private_key" \
+          --custom-rpc "$fastest_rpc" \
+          --amount "$amount" \
+          --spend "$spend" \
+          --fee "0.0001"; then
+          
+          total_burned=$(echo "scale=6; $total_burned + $amount" | bc -l)
+          echo -e "${GREEN}[+] 第 $i 次燃烧成功，已燃烧: $total_burned ETH${NC}"
+        else
+          echo -e "${RED}[!] 第 $i 次燃烧失败${NC}"
+          read -p "是否继续下一次燃烧？ [y/N]: " continue_burn
+          if [[ ! "$continue_burn" =~ ^[Yy]$ ]]; then
+            break
+          fi
+        fi
+        
+        # Wait between burns to avoid rate limiting
+        if [ $i -lt $burn_count ]; then
+          echo -e "${YELLOW}等待 3 秒后进行下一次燃烧...${NC}"
+          sleep 3
+        fi
+      done
+      
+      # Handle remaining amount if any
+      if (( $(echo "$remaining > 0" | bc -l) )); then
+        echo -e "${GREEN}[*] 燃烧剩余数量: $remaining ETH${NC}"
+        
+        # Calculate proportional spend for remaining
+        remaining_spend=$(echo "scale=6; $remaining * $spend / $amount" | bc -l)
+        
+        if "$worm_miner_bin" burn \
+          --network sepolia \
+          --private-key "$private_key" \
+          --custom-rpc "$fastest_rpc" \
+          --amount "$remaining" \
+          --spend "$remaining_spend" \
+          --fee "0.0001"; then
+          
+          total_burned=$(echo "scale=6; $total_burned + $remaining" | bc -l)
+          echo -e "${GREEN}[+] 剩余燃烧成功${NC}"
+        else
+          echo -e "${RED}[!] 剩余燃烧失败${NC}"
+        fi
+      fi
+      
+      echo -e "${GREEN}[+] 批量燃烧过程已完成。总共燃烧: $total_burned ETH${NC}"
       read -p "按 Enter 键继续..."
       ;;
     5)
