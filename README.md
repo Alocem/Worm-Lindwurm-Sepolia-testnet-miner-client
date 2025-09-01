@@ -23,7 +23,7 @@
 * **下载脚本**：
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/scarletbright/Worm-Lindwurm-Sepolia-testnet-miner-client/main/worm-lindwurm-testnet-miner-cli.sh -o worm-miner.sh
+curl -sSL https://raw.githubusercontent.com/Alocem/Worm-Lindwurm-Sepolia-testnet-miner-client/main/worm-lindwurm-testnet-miner-cli.sh -o worm-miner.sh
 ```
 
 *  **使脚本可执行**：
