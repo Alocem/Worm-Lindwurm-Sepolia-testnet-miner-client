@@ -23,12 +23,6 @@ sepolia_rpcs=(
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
     "https://sepolia.gateway.tenderly.co"
-    "https://rpc.sepolia.org"
-    "https://1rpc.io/sepolia"
-    "https://sepolia.blockpi.network/v1/rpc/public"
-    "https://endpoints.omniatech.io/v1/eth/sepolia/public"
-    "https://ethereum-sepolia.blockpi.network/v1/rpc/public"
-    "https://rpc2.sepolia.org"
     "https://sepolia-rpc.scroll.io"
     "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
     "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
@@ -211,18 +205,20 @@ EOL
   echo -e "${GREEN}---- WORM 挖矿工具 ----${NC}"
   echo -e "${BOLD}请选择操作:${NC}"
   echo "1. 安装挖矿程序并启动服务"
-  echo "2. 燃烧 ETH 获取 BETH"
-  echo "3. 查看余额"
-  echo "4. 更新挖矿程序"
-  echo "5. 卸载挖矿程序"
-  echo "6. 领取 WORM 奖励"
-  echo "7. 查看挖矿日志"
-  echo "8. 查找并设置最快的 RPC"
-  echo "9. 设置钱包私钥"
-  echo "10. 设置挖矿参数"
-  echo "11. 退出"
+  echo "2. 启动挖矿服务"
+  echo "3. 停止挖矿服务"
+  echo "4. 燃烧 ETH 获取 BETH"
+  echo "5. 查看余额"
+  echo "6. 更新挖矿程序"
+  echo "7. 卸载挖矿程序"
+  echo "8. 领取 WORM 奖励"
+  echo "9. 查看挖矿日志"
+  echo "10. 查找并设置最快的 RPC"
+  echo "11. 设置钱包私钥"
+  echo "12. 设置挖矿参数"
+  echo "13. 退出"
   echo -e "${GREEN}------------------------${NC}"
-  read -p "请输入选择 [1-11]: " action
+  read -p "请输入选择 [1-13]: " action
 
   case $action in
     1)
@@ -327,6 +323,125 @@ EOL
       echo -e "${GREEN}[+] 挖矿程序安装成功并已启动服务！${NC}"
       ;;
     2)
+      echo -e "${GREEN}[*] 启动挖矿服务${NC}"
+      
+      # Check if miner is installed
+      if [ ! -f "$worm_miner_bin" ]; then
+        echo -e "${RED}错误: 挖矿程序未安装。请先运行选项 1 进行安装。${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
+      
+      # Check if private key exists
+      if [ ! -f "$key_file" ]; then
+        echo -e "${RED}错误: 未找到私钥文件。请先运行选项 1 进行安装或选项 10 设置私钥。${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
+      
+      # Check if service exists
+      if [ ! -f "/etc/systemd/system/worm-miner.service" ]; then
+        echo -e "${YELLOW}[!] 系统服务不存在，正在创建...${NC}"
+        
+        sudo tee /etc/systemd/system/worm-miner.service > /dev/null <<EOL
+[Unit]
+Description=Worm Miner (Sepolia Testnet)
+After=network.target
+
+[Service]
+User=$(whoami)
+WorkingDirectory=$miner_dir
+ExecStart=$miner_dir/start-miner.sh
+Restart=always
+RestartSec=10
+Environment="RUST_LOG=info"
+StandardOutput=append:$log_file
+StandardError=append:$log_file
+
+[Install]
+WantedBy=multi-user.target
+EOL
+        sudo systemctl daemon-reload
+      fi
+      
+      # Check service status
+      if systemctl is-active --quiet worm-miner; then
+        echo -e "${YELLOW}[!] 挖矿服务已在运行中。${NC}"
+        echo -e "${BOLD}当前状态:${NC}"
+        sudo systemctl status worm-miner --no-pager -l
+        echo ""
+        read -p "是否重启服务？ [y/N]: " restart_choice
+        if [[ "$restart_choice" =~ ^[Yy]$ ]]; then
+          sudo systemctl restart worm-miner
+          echo -e "${GREEN}[+] 挖矿服务已重启。${NC}"
+        fi
+      else
+        echo -e "${GREEN}[*] 正在启动挖矿服务...${NC}"
+        sudo systemctl enable --now worm-miner
+        
+        # Wait a moment and check status
+        sleep 2
+        if systemctl is-active --quiet worm-miner; then
+          echo -e "${GREEN}[+] 挖矿服务启动成功！${NC}"
+        else
+          echo -e "${RED}[!] 挖矿服务启动失败。请检查日志:${NC}"
+          sudo systemctl status worm-miner --no-pager -l
+        fi
+      fi
+      
+      read -p "按 Enter 键继续..."
+      ;;
+    3)
+      echo -e "${GREEN}[*] 停止挖矿服务${NC}"
+      
+      # Check if service exists
+      if [ ! -f "/etc/systemd/system/worm-miner.service" ]; then
+        echo -e "${YELLOW}[!] 挖矿服务不存在。${NC}"
+        read -p "按 Enter 键继续..."
+        continue
+      fi
+      
+      # Check service status - include activating state
+      service_state=$(systemctl is-active worm-miner 2>/dev/null || echo "inactive")
+      
+      if [[ "$service_state" == "active" || "$service_state" == "activating" ]]; then
+        if [[ "$service_state" == "activating" ]]; then
+          echo -e "${YELLOW}[!] 挖矿服务正在重启循环中，正在停止...${NC}"
+        else
+          echo -e "${YELLOW}[!] 挖矿服务正在运行中，正在停止...${NC}"
+        fi
+        
+        sudo systemctl stop worm-miner
+        
+        # Wait a moment and check status
+        sleep 3
+        new_state=$(systemctl is-active worm-miner 2>/dev/null || echo "inactive")
+        
+        if [[ "$new_state" == "inactive" ]]; then
+          echo -e "${GREEN}[+] 挖矿服务已成功停止。${NC}"
+        else
+          echo -e "${RED}[!] 挖矿服务停止失败，当前状态: $new_state${NC}"
+          echo -e "${YELLOW}[!] 尝试强制停止...${NC}"
+          sudo systemctl kill worm-miner
+          sleep 2
+          final_state=$(systemctl is-active worm-miner 2>/dev/null || echo "inactive")
+          if [[ "$final_state" == "inactive" ]]; then
+            echo -e "${GREEN}[+] 挖矿服务已强制停止。${NC}"
+          else
+            echo -e "${RED}[!] 无法停止挖矿服务。${NC}"
+          fi
+        fi
+      else
+        echo -e "${YELLOW}[!] 挖矿服务当前未运行。${NC}"
+      fi
+      
+      # Show current status
+      echo -e "${BOLD}当前服务状态:${NC}"
+      sudo systemctl status worm-miner --no-pager -l
+      
+      read -p "按 Enter 键继续..."
+      ;;
+    4)
       echo -e "${GREEN}[*] 正在燃烧 ETH 获取 BETH${NC}"
       private_key=$(get_private_key) || exit 1
 
@@ -344,12 +459,12 @@ EOL
         --custom-rpc "$fastest_rpc" \
         --amount "$amount" \
         --spend "$spend" \
-        --fee "0"
+        --fee "0.0001"
 
       echo -e "${GREEN}[+] 燃烧过程已完成。${NC}"
       read -p "按 Enter 键继续..."
       ;;
-    3)
+    5)
       echo -e "${GREEN}[*] 正在检查余额...${NC}"
       private_key=$(get_private_key) || exit 1
 
@@ -380,7 +495,7 @@ EOL
       
       read -p "按 Enter 键继续..."
       ;;
-    4)
+    6)
       echo -e "${GREEN}[*] 正在更新挖矿程序...${NC}"
       if [ ! -d "$miner_dir" ]; then
         echo -e "${RED}错误: 未找到挖矿程序目录 $miner_dir。请先运行选项 1 进行安装。${NC}"
@@ -401,7 +516,7 @@ EOL
       sudo systemctl restart worm-miner
       echo -e "${GREEN}[+] 挖矿程序更新成功并已重启。${NC}"
       ;;
-    5)
+    7)
       echo -e "${GREEN}[*] 正在卸载挖矿程序...${NC}"
       sudo systemctl stop worm-miner || true
       sudo systemctl disable worm-miner || true
@@ -410,7 +525,7 @@ EOL
       rm -rf "$log_dir" "$miner_dir" "$worm_miner_bin"
       echo -e "${GREEN}[+] 挖矿程序已卸载。${NC}"
       ;;
-    6)
+    8)
       echo -e "${GREEN}[*] 正在领取 WORM 奖励...${NC}"
       private_key=$(get_private_key) || exit 1
 
@@ -430,7 +545,7 @@ EOL
       echo -e "${GREEN}[+] WORM 奖励领取过程已完成。${NC}"
       read -p "按 Enter 键继续..."
       ;;
-    7)
+    9)
       echo -e "${GREEN}[*] 正在显示挖矿日志的最后15行...${NC}"
       if [ -f "$log_file" ]; then
         tail -n 15 "$log_file"
@@ -439,12 +554,12 @@ EOL
       fi
       read -p "按 Enter 键继续..."
       ;;
-    8)
+    10)
       echo -e "${GREEN}[*] 正在查找并设置最快的 RPC...${NC}"
       find_fastest_rpc
       read -p "按 Enter 键继续..."
       ;;
-    9)
+    11)
       echo -e "${GREEN}[*] 设置钱包私钥${NC}"
       
       # Show current private key (masked)
@@ -475,7 +590,7 @@ EOL
       echo -e "${GREEN}[+] 私钥已更新并保存到 $key_file${NC}"
       echo -e "${GREEN}[*] 警告: 请安全备份此文件！${NC}"
       ;;
-    10)
+    12)
       echo -e "${GREEN}[*] 设置挖矿参数${NC}"
       
       # Check if miner directory exists
@@ -507,8 +622,33 @@ EOL
       echo -e "${GREEN}[*] 正在更新挖矿启动脚本...${NC}"
       tee "$miner_dir/start-miner.sh" > /dev/null <<EOL
 #!/bin/bash
+set -e
+
+# Check if required files exist
+if [ ! -f "$key_file" ]; then
+    echo "错误: 私钥文件不存在: $key_file"
+    exit 1
+fi
+
+if [ ! -f "$fastest_rpc_file" ]; then
+    echo "错误: RPC文件不存在: $fastest_rpc_file"
+    exit 1
+fi
+
 PRIVATE_KEY=\$(cat "$key_file")
 FASTEST_RPC=\$(cat "$fastest_rpc_file")
+
+# Validate private key format
+if [[ ! \$PRIVATE_KEY =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    echo "错误: 私钥格式无效"
+    exit 1
+fi
+
+echo "启动挖矿程序..."
+echo "网络: sepolia"
+echo "RPC: \$FASTEST_RPC"
+echo "参数: --amount-per-epoch $amount_per_epoch --num-epochs $num_epochs --claim-interval $claim_interval"
+
 exec "$worm_miner_bin" mine \\
   --network sepolia \\
   --private-key "\$PRIVATE_KEY" \\
@@ -533,12 +673,12 @@ EOL
         fi
       fi
       ;;
-    11)
-      echo -e "${GREEN}[*] 正在退出...${NC}"
+    13)
+      echo -e "${GREEN}[*] 退出程序${NC}"
       exit 0
       ;;
     *)
-      echo -e "${YELLOW}无效选择。请输入 1 到 11 之间的数字。${NC}"
+      echo -e "${YELLOW}无效选择。请输入 1-13。${NC}"
       ;;
     esac
 
