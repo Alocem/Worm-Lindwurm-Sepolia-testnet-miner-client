@@ -19,9 +19,11 @@ fastest_rpc_file="$log_dir/fastest_rpc.log"
 
 # A more reliable list of RPCs to test
 sepolia_rpcs=(
-    "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
-    "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
-    "https://lb.drpc.org/sepolia/AkhJnvrfNEEXvyMMbSG_oUi9ITlPhuYR8IfjqhnKxixj"
+    "https://sepolia.drpc.org"
+    "https://ethereum-sepolia-rpc.publicnode.com"
+    "https://eth-sepolia.public.blastapi.io"
+    "https://sepolia.gateway.tenderly.co"
+    "https://rpc.sepolia.org"
 )
 
 # Helper: Get private key from user file
@@ -45,15 +47,31 @@ find_fastest_rpc() {
     min_latency=999999
 
     for rpc in "${sepolia_rpcs[@]}"; do
-        # Use --max-time to prevent hangs on unresponsive RPCs
-        latency=$(curl -o /dev/null --connect-timeout 5 --max-time 10 -s -w "%{time_total}" "$rpc" || echo "999999")
-        echo -e "测试 RPC: $rpc | 延迟: ${YELLOW}$latency${NC} 秒"
-        # Convert to milliseconds for integer comparison
-        latency_ms=$(echo "$latency * 1000" | awk '{printf "%.0f", $1}')
-        min_latency_ms=$(echo "$min_latency * 1000" | awk '{printf "%.0f", $1}')
-        if [[ "$latency_ms" -lt "$min_latency_ms" && "$latency_ms" -gt 0 ]]; then
-            min_latency=$latency
-            fastest_rpc=$rpc
+        echo -e "${YELLOW}测试 RPC: $rpc${NC}"
+        
+        # Test with a simple JSON-RPC request to get chain ID
+        start_time=$(date +%s.%N)
+        response=$(curl -s --connect-timeout 5 --max-time 10 \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+            "$rpc" 2>/dev/null)
+        end_time=$(date +%s.%N)
+        
+        if [[ $? -eq 0 && "$response" == *"result"* ]]; then
+            # Calculate latency
+            latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
+            echo -e "  延迟: ${GREEN}$latency${NC} 秒 ✓"
+            
+            # Convert to milliseconds for comparison
+            latency_ms=$(echo "$latency * 1000" | awk '{printf "%.0f", $1}')
+            min_latency_ms=$(echo "$min_latency * 1000" | awk '{printf "%.0f", $1}')
+            
+            if [[ "$latency_ms" -lt "$min_latency_ms" ]]; then
+                min_latency=$latency
+                fastest_rpc=$rpc
+            fi
+        else
+            echo -e "  ${RED}连接失败${NC} ✗"
         fi
     done
 
@@ -62,7 +80,9 @@ find_fastest_rpc() {
         echo -e "${GREEN}[+] 最快的 RPC 已设置为: $fastest_rpc，延迟: $min_latency 秒。${NC}"
     else
         echo -e "${RED}错误: 无法确定最快的 RPC。请检查您的网络连接。${NC}"
-        exit 1
+        # Set a default RPC as fallback
+        echo "https://sepolia.drpc.org" > "$fastest_rpc_file"
+        echo -e "${YELLOW}[!] 使用默认 RPC: https://sepolia.drpc.org${NC}"
     fi
 }
 
