@@ -19,6 +19,9 @@ fastest_rpc_file="$log_dir/fastest_rpc.log"
 
 # A more reliable list of RPCs to test
 sepolia_rpcs=(
+    "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
+    "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
+    "https://lb.drpc.org/sepolia/AkhJnvrfNEEXvyMMbSG_oUi9ITlPhuYR8IfjqhnKxixj"
     "https://sepolia.drpc.org"
     "https://ethereum-sepolia-rpc.publicnode.com"
     "https://eth-sepolia.public.blastapi.io"
@@ -49,15 +52,16 @@ find_fastest_rpc() {
     for rpc in "${sepolia_rpcs[@]}"; do
         echo -e "${YELLOW}测试 RPC: $rpc${NC}"
         
-        # Test with a simple JSON-RPC request to get chain ID
+        # Test with JSON-RPC request
         start_time=$(date +%s.%N)
         response=$(curl -s --connect-timeout 5 --max-time 10 \
+            -X POST \
             -H "Content-Type: application/json" \
-            -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+            -d '{"method": "eth_blockNumber","params": [],"id": "1","jsonrpc": "2.0"}' \
             "$rpc" 2>/dev/null)
         end_time=$(date +%s.%N)
         
-        if [[ $? -eq 0 && "$response" == *"result"* ]]; then
+        if [[ $? -eq 0 && ("$response" == *"result"* || "$response" == *"0x"*) ]]; then
             # Calculate latency
             latency=$(echo "$end_time - $start_time" | awk '{printf "%.3f", $1}')
             echo -e "  延迟: ${GREEN}$latency${NC} 秒 ✓"
@@ -108,9 +112,11 @@ EOL
   echo "6. 领取 WORM 奖励"
   echo "7. 查看挖矿日志"
   echo "8. 查找并设置最快的 RPC"
-  echo "9. 退出"
+  echo "9. 设置钱包私钥"
+  echo "10. 设置挖矿参数"
+  echo "11. 退出"
   echo -e "${GREEN}------------------------${NC}"
-  read -p "请输入选择 [1-9]: " action
+  read -p "请输入选择 [1-11]: " action
 
   case $action in
     1)
@@ -295,6 +301,10 @@ EOL
         echo -e "${YELLOW}错误: 纪元值必须是非负整数。${NC}"
         continue
       fi
+      if [ "$from_epoch" -lt 0 ] || [ "$num_epochs" -le 0 ]; then
+        echo -e "${YELLOW}错误: 纪元值必须是非负整数，领取数量必须大于 0。${NC}"
+        continue
+      fi
       "$worm_miner_bin" claim --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" --from-epoch "$from_epoch" --num-epochs "$num_epochs"
       echo -e "${GREEN}[+] WORM 奖励领取过程已完成。${NC}"
       ;;
@@ -311,11 +321,100 @@ EOL
       find_fastest_rpc
       ;;
     9)
+      echo -e "${GREEN}[*] 设置钱包私钥${NC}"
+      
+      # Show current private key (masked)
+      if [ -f "$key_file" ]; then
+        current_key=$(cat "$key_file")
+        masked_key="${current_key:0:6}...${current_key: -4}"
+        echo -e "${YELLOW}当前私钥: $masked_key${NC}"
+      else
+        echo -e "${YELLOW}当前没有设置私钥${NC}"
+      fi
+      
+      echo -e "${YELLOW}警告: 请确保使用专门为测试网创建的钱包，不要使用主网钱包！${NC}"
+      
+      private_key=""
+      while true; do
+        read -sp "请输入新的私钥 (例如: 0x...): " private_key
+        echo ""
+        if [[ $private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+          break
+        else
+          echo -e "${YELLOW}私钥格式无效。必须是以0x开头的64位十六进制字符。${NC}"
+        fi
+      done
+      
+      mkdir -p "$log_dir"
+      echo "$private_key" > "$key_file"
+      chmod 600 "$key_file"
+      echo -e "${GREEN}[+] 私钥已更新并保存到 $key_file${NC}"
+      echo -e "${GREEN}[*] 警告: 请安全备份此文件！${NC}"
+      ;;
+    10)
+      echo -e "${GREEN}[*] 设置挖矿参数${NC}"
+      
+      # Check if miner directory exists
+      if [ ! -d "$miner_dir" ]; then
+        echo -e "${RED}错误: 挖矿程序未安装。请先运行选项 1 安装挖矿程序。${NC}"
+        continue
+      fi
+      
+      # Show current parameters
+      if [ -f "$miner_dir/start-miner.sh" ]; then
+        echo -e "${YELLOW}当前挖矿参数:${NC}"
+        grep -E "(amount-per-epoch|num-epochs|claim-interval)" "$miner_dir/start-miner.sh" | sed 's/^/  /'
+        echo ""
+      fi
+      
+      echo -e "${BOLD}请设置新的挖矿参数:${NC}"
+      
+      read -p "每个纪元花费的 BETH 数量 (例如: 0.0001): " amount_per_epoch
+      read -p "提前参与的纪元数量 (例如: 3): " num_epochs
+      read -p "领取操作间隔纪元数 (例如: 10): " claim_interval
+      
+      # Validate inputs
+      if ! [[ "$amount_per_epoch" =~ ^[0-9]+\.?[0-9]*$ ]] || ! [[ "$num_epochs" =~ ^[0-9]+$ ]] || ! [[ "$claim_interval" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}错误: 参数格式无效。请输入有效的数字。${NC}"
+        continue
+      fi
+      
+      # Update start-miner.sh
+      echo -e "${GREEN}[*] 正在更新挖矿启动脚本...${NC}"
+      tee "$miner_dir/start-miner.sh" > /dev/null <<EOL
+#!/bin/bash
+PRIVATE_KEY=\$(cat "$key_file")
+FASTEST_RPC=\$(cat "$fastest_rpc_file")
+exec "$worm_miner_bin" mine \\
+  --network sepolia \\
+  --private-key "\$PRIVATE_KEY" \\
+  --custom-rpc "\$FASTEST_RPC" \\
+  --amount-per-epoch "$amount_per_epoch" \\
+  --num-epochs "$num_epochs" \\
+  --claim-interval "$claim_interval"
+EOL
+      chmod +x "$miner_dir/start-miner.sh"
+      
+      echo -e "${GREEN}[+] 挖矿参数已更新:${NC}"
+      echo -e "  每个纪元花费: $amount_per_epoch BETH"
+      echo -e "  参与纪元数量: $num_epochs"
+      echo -e "  领取间隔: $claim_interval 纪元"
+      
+      # Ask if user wants to restart the service
+      if systemctl is-active --quiet worm-miner; then
+        read -p "挖矿服务正在运行，是否重启以应用新参数？ [y/N]: " restart_confirm
+        if [[ "$restart_confirm" =~ ^[yY]$ ]]; then
+          sudo systemctl restart worm-miner
+          echo -e "${GREEN}[+] 挖矿服务已重启${NC}"
+        fi
+      fi
+      ;;
+    11)
       echo -e "${GREEN}[*] 正在退出...${NC}"
       exit 0
       ;;
     *)
-      echo -e "${YELLOW}无效选择。请输入 1 到 9 之间的数字。${NC}"
+      echo -e "${YELLOW}无效选择。请输入 1 到 11 之间的数字。${NC}"
       ;;
     esac
 
