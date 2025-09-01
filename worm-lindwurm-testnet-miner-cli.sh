@@ -48,7 +48,10 @@ find_fastest_rpc() {
         # Use --max-time to prevent hangs on unresponsive RPCs
         latency=$(curl -o /dev/null --connect-timeout 5 --max-time 10 -s -w "%{time_total}" "$rpc" || echo "999999")
         echo -e "测试 RPC: $rpc | 延迟: ${YELLOW}$latency${NC} 秒"
-        if (( $(echo "$latency < $min_latency" | bc -l) && $(echo "$latency > 0" | bc -l) )); then
+        # Convert to milliseconds for integer comparison
+        latency_ms=$(echo "$latency * 1000" | awk '{printf "%.0f", $1}')
+        min_latency_ms=$(echo "$min_latency * 1000" | awk '{printf "%.0f", $1}')
+        if [[ "$latency_ms" -lt "$min_latency_ms" && "$latency_ms" -gt 0 ]]; then
             min_latency=$latency
             fastest_rpc=$rpc
         fi
