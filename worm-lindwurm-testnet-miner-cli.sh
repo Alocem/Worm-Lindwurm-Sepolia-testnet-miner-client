@@ -24,9 +24,6 @@ sepolia_rpcs=(
     "https://eth-sepolia.public.blastapi.io"
     "https://sepolia.gateway.tenderly.co"
     "https://sepolia-rpc.scroll.io"
-    "https://lb.drpc.org/sepolia/AkN5KTMwrkQcrhMRTLHEJP0Q5qk2hukR8IfpqhnKxixj"
-    "https://lb.drpc.org/sepolia/ArII-5JsVUlwmMr09jfLuE6LLBsohuAR8IffqhnKxixj"
-    "https://lb.drpc.org/sepolia/AkhJnvrfNEEXvyMMbSG_oUi9ITlPhuYR8IfjqhnKxixj"
 )
 
 # Helper: Get private key from user file
